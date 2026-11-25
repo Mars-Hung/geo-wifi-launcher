@@ -36,6 +36,7 @@ import tw.geowifi.launcher.core.schedule.ScheduleCodec
 import tw.geowifi.launcher.core.schedule.TimeRange
 import tw.geowifi.launcher.core.schedule.TimeWindows
 import tw.geowifi.launcher.core.schedule.WeekSchedule
+import tw.geowifi.launcher.core.wifi.SsidMatchMode
 import tw.geowifi.launcher.core.wifi.WifiIds
 import tw.geowifi.launcher.core.wifi.WifiSight
 
@@ -126,7 +127,9 @@ class RuleLogicTest {
             Clause(listOf(ChargingAtom("c1", setOf(ChargeType.USB, ChargeType.AC)))),
             Clause(listOf(BluetoothAtom("b1", "11:22:33:44:55:66", "車機"))),
         )
-        assertEquals(clauses, LogicCodec.decode(LogicCodec.encode(clauses)))
+        val stored = LogicCodec.decode(LogicCodec.encode(clauses, 1_800_000))
+        assertEquals(clauses, stored.clauses)
+        assertEquals(1_800_000L, stored.cooldownMillis)
         val memory = RuleMemory(
             armed = false,
             windowActive = true,
@@ -340,7 +343,7 @@ class RuleLogicTest {
     @Test
     fun windowStartFiresOnceWhenAlreadyMatching() {
         val schedule = weekdays(9 to 18)
-        val spec = RuleSpec(1, true, listOf(Clause(listOf(wifi(dwellMillis = 0)))), schedule)
+        val spec = RuleSpec(1, true, listOf(Clause(listOf(wifi(dwellMillis = 0)))), schedule, cooldownMillis = 0)
         var step = eval(spec, RuleMemory(), wifiLevel(-40), 0, at(DayOfWeek.SUNDAY, 12, 0))
         assertTrue(step.action is Action.None)
         assertTrue(step.memory.formulaTrue)
@@ -353,6 +356,65 @@ class RuleLogicTest {
         assertTrue(step.memory.armed)
         step = eval(spec, step.memory, Inputs(nowMillis = 4), at(DayOfWeek.TUESDAY, 9, 0))
         assertFire(step, FireReason.WINDOW_OPENED)
+    }
+
+    @Test
+    fun scanMatchUsesStrongestNetworkAndDoesNotNeedAConnection() {
+        val spec = rule(
+            wifi(ssid = "7-11", ssidMatch = SsidMatchMode.CONTAINS, caseInsensitive = true, dwellMillis = 0),
+        )
+        val weak = WifiSight("shop-7-11", null, -80)
+        val strong = WifiSight("7-11_FREE", null, -55)
+        val other = WifiSight("Home", null, -30)
+        val inputs = WifiInputs(
+            connected = WifiSight("Home", null, -30),
+            connectedKnown = true,
+            visible = listOf(weak, other, strong),
+            visibleFresh = true,
+        )
+        val step = eval(spec, RuleMemory(), inputs.at(0), noon())
+        assertFire(step, FireReason.CONDITIONS_MET)
+        assertEquals(-55, step.memory.atoms.getValue("w").lastRssi)
+        val onlyWeak = eval(
+            spec,
+            RuleMemory(),
+            WifiInputs(null, true, listOf(weak), true).at(0),
+            noon(),
+        )
+        assertTrue(onlyWeak.action is Action.None)
+    }
+
+    @Test
+    fun ssidMatchModes() {
+        assertTrue(WifiIds.ssidMatches("7-11", "Guest-7-11", SsidMatchMode.CONTAINS, true))
+        assertTrue(WifiIds.ssidMatches("7-11", "7-11_WiFi", SsidMatchMode.CONTAINS, true))
+        assertFalse(WifiIds.ssidMatches("7-11", "711", SsidMatchMode.CONTAINS, true))
+        assertFalse(WifiIds.ssidMatches("7-11", "xx7-11", SsidMatchMode.EXACT, true))
+        assertTrue(WifiIds.ssidMatches("7-11", "7-11 Store", SsidMatchMode.STARTS_WITH, true))
+        assertFalse(WifiIds.ssidMatches("7-11", "A7-11", SsidMatchMode.STARTS_WITH, true))
+        assertTrue(WifiIds.ssidMatches("7-11.*", "7-11_FREE", SsidMatchMode.REGEX, true))
+        assertFalse(WifiIds.ssidMatches("[", "7-11", SsidMatchMode.REGEX, true))
+        assertFalse(WifiIds.ssidMatches("7-Eleven", "7-eleven guest", SsidMatchMode.CONTAINS, false))
+        assertTrue(WifiIds.ssidMatches("7-Eleven", "7-eleven guest", SsidMatchMode.CONTAINS, true))
+    }
+
+    @Test
+    fun cooldownBlocksTheNextStoreUntilItElapses() {
+        val spec = rule(
+            wifi(ssid = "7-11", ssidMatch = SsidMatchMode.CONTAINS, dwellMillis = 0, disappearMillis = 30_000),
+        ).copy(cooldownMillis = 30L * 60L * 1000L)
+        var step = eval(spec, RuleMemory(), sight("7-11 A", -50), 0)
+        assertFire(step, FireReason.CONDITIONS_MET)
+        step = eval(spec, step.memory, wifiAbsent(), 60_000)
+        assertTrue(step.memory.armed)
+        step = eval(spec, step.memory, sight("7-11 B", -48), 5 * 60_000)
+        assertTrue(step.action is Action.None)
+        assertFalse(step.memory.armed)
+        step = eval(spec, step.memory, sight("7-11 B", -48), 31 * 60_000)
+        assertTrue(step.action is Action.None)
+        step = eval(spec, step.memory, wifiAbsent(), 32 * 60_000)
+        step = eval(spec, step.memory, sight("7-11 C", -40), 33 * 60_000)
+        assertFire(step, FireReason.CONDITIONS_MET)
     }
 
     @Test
@@ -375,16 +437,25 @@ class RuleLogicTest {
         assertFalse(step.memory.armed)
     }
 
-    private fun rule(atom: tw.geowifi.launcher.core.rule.Atom) = RuleSpec(1, true, listOf(Clause(listOf(atom))), null)
+    private fun rule(atom: tw.geowifi.launcher.core.rule.Atom) = RuleSpec(
+        id = 1,
+        enabled = true,
+        clauses = listOf(Clause(listOf(atom))),
+        schedule = null,
+        cooldownMillis = 0,
+    )
 
     private fun wifi(
         mode: WifiMatchMode = WifiMatchMode.VISIBLE,
         dwellMillis: Long = 60_000,
         disappearMillis: Long = 180_000,
         maxGapMillis: Long = Defaults.maxGapMillis,
+        ssid: String = "Home",
+        ssidMatch: SsidMatchMode = SsidMatchMode.EXACT,
+        caseInsensitive: Boolean = false,
     ) = WifiAtom(
         id = "w",
-        ssid = "Home",
+        ssid = ssid,
         bssid = null,
         mode = mode,
         minRssiDbm = -65,
@@ -392,6 +463,15 @@ class RuleLogicTest {
         rearmDropDbm = 10,
         disappearMillis = disappearMillis,
         maxGapMillis = maxGapMillis,
+        ssidMatch = ssidMatch,
+        caseInsensitive = caseInsensitive,
+    )
+
+    private fun sight(ssid: String, rssi: Int) = WifiInputs(
+        connected = null,
+        connectedKnown = true,
+        visible = listOf(WifiSight(ssid, null, rssi)),
+        visibleFresh = true,
     )
 
     private fun region(

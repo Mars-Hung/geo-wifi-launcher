@@ -19,12 +19,13 @@ data class RuleRecord(
     val enabled: Boolean,
     val clauses: List<Clause>,
     val schedule: WeekSchedule?,
+    val cooldownMillis: Long,
     val targetPackage: String,
     val targetLabel: String,
     val memory: RuleMemory,
     val lastTriggeredAt: Long?,
 ) {
-    fun toSpec(): RuleSpec = RuleSpec(id, enabled, clauses, schedule)
+    fun toSpec(): RuleSpec = RuleSpec(id, enabled, clauses, schedule, cooldownMillis)
 }
 
 data class RuleDraft(
@@ -32,6 +33,7 @@ data class RuleDraft(
     val name: String,
     val clauses: List<Clause>,
     val schedule: WeekSchedule?,
+    val cooldownMillis: Long,
     val targetPackage: String,
     val targetLabel: String,
 )
@@ -62,7 +64,7 @@ class RuleRepository(private val database: AppDatabase) {
 
     suspend fun save(draft: RuleDraft) {
         val now = System.currentTimeMillis()
-        val logic = LogicCodec.encode(draft.clauses)
+        val logic = LogicCodec.encode(draft.clauses, draft.cooldownMillis)
         val days = ScheduleCodec.encodeDays(draft.schedule?.days ?: emptySet())
         val ranges = ScheduleCodec.encodeRanges(draft.schedule?.ranges ?: emptyList())
         val scheduleEnabled = draft.schedule != null
@@ -86,7 +88,8 @@ class RuleRepository(private val database: AppDatabase) {
             )
             return
         }
-        val sameLogic = existing.logicText == logic &&
+        val previous = LogicCodec.decode(existing.logicText)
+        val sameLogic = previous.clauses == draft.clauses &&
             existing.scheduleEnabled == scheduleEnabled &&
             existing.scheduleDays == days &&
             existing.scheduleRanges == ranges
@@ -146,12 +149,14 @@ private fun RuleEntity.toRecord(): RuleRecord {
     } catch (_: RuntimeException) {
         RuleMemory()
     }
+    val stored = LogicCodec.decode(logicText)
     return RuleRecord(
         id = id,
         name = name,
         enabled = enabled,
-        clauses = LogicCodec.decode(logicText),
+        clauses = stored.clauses,
         schedule = schedule,
+        cooldownMillis = stored.cooldownMillis,
         targetPackage = targetPackage,
         targetLabel = targetLabel,
         memory = memory,

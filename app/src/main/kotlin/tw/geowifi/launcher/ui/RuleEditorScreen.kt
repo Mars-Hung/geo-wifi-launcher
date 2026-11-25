@@ -83,6 +83,7 @@ import tw.geowifi.launcher.core.rule.WifiAtom
 import tw.geowifi.launcher.core.rule.WifiMatchMode
 import tw.geowifi.launcher.core.schedule.TimeRange
 import tw.geowifi.launcher.core.schedule.WeekSchedule
+import tw.geowifi.launcher.core.wifi.SsidMatchMode
 import tw.geowifi.launcher.core.wifi.WifiIds
 import tw.geowifi.launcher.data.RuleDraft
 import tw.geowifi.launcher.monitor.Permissions
@@ -99,7 +100,9 @@ internal data class AtomDraft(
     val transition: LocationTransition = LocationTransition.ENTER,
     val ssid: String = "",
     val bssid: String = "",
-    val wifiMode: WifiMatchMode = WifiMatchMode.EITHER,
+    val wifiMode: WifiMatchMode = WifiMatchMode.VISIBLE,
+    val ssidMatch: SsidMatchMode = SsidMatchMode.CONTAINS,
+    val caseInsensitive: Boolean = true,
     val minRssi: Int = -65,
     val wifiDwellSec: Int = 60,
     val rearmDrop: Int = 10,
@@ -133,6 +136,18 @@ fun RuleEditorScreen(ruleId: Long, onDone: () -> Unit) {
             placeholder = { Text(stringResource(R.string.editor_name_hint)) },
             modifier = Modifier.fillMaxWidth(),
         )
+        val cooldownLabel = if (model.cooldownMinutes == 0) {
+            stringResource(R.string.editor_cooldown_off)
+        } else {
+            stringResource(R.string.editor_cooldown, model.cooldownMinutes)
+        }
+        Text(cooldownLabel)
+        Slider(
+            value = model.cooldownMinutes.toFloat(),
+            onValueChange = { model.cooldownMinutes = (it / 5f).roundToInt() * 5 },
+            valueRange = 0f..180f,
+        )
+        Text(stringResource(R.string.editor_cooldown_help), style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.editor_conditions), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.editor_conditions_help))
         model.clauses.forEachIndexed { index, clause ->
@@ -271,7 +286,9 @@ private fun RegionFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
 @Composable
 private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
     var networks by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
+    var didScan by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    Text(stringResource(R.string.editor_wifi_scan_help), style = MaterialTheme.typography.bodySmall)
     OutlinedTextField(
         value = atom.ssid,
         onValueChange = { onChange(atom.copy(ssid = it)) },
@@ -285,9 +302,10 @@ private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
         modifier = Modifier.fillMaxWidth(),
     )
     OutlinedButton(onClick = {
+        didScan = true
         networks = readVisibleNetworks(context).map { (it.ssid to (it.bssid ?: "")) }
     }) { Text(stringResource(R.string.editor_wifi_scan)) }
-    if (networks.isEmpty()) {
+    if (didScan && networks.isEmpty()) {
         Text(stringResource(R.string.editor_wifi_empty), style = MaterialTheme.typography.bodySmall)
     }
     networks.distinctBy { it.first to it.second }.take(12).forEach { (ssid, bssid) ->
@@ -296,9 +314,22 @@ private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
-        WifiModeChip(WifiMatchMode.CONNECTED, R.string.editor_wifi_mode_connected, atom, onChange)
         WifiModeChip(WifiMatchMode.VISIBLE, R.string.editor_wifi_mode_visible, atom, onChange)
+        WifiModeChip(WifiMatchMode.CONNECTED, R.string.editor_wifi_mode_connected, atom, onChange)
         WifiModeChip(WifiMatchMode.EITHER, R.string.editor_wifi_mode_either, atom, onChange)
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        SsidMatchChip(SsidMatchMode.CONTAINS, R.string.editor_match_contains, atom, onChange)
+        SsidMatchChip(SsidMatchMode.EXACT, R.string.editor_match_exact, atom, onChange)
+        SsidMatchChip(SsidMatchMode.STARTS_WITH, R.string.editor_match_prefix, atom, onChange)
+        SsidMatchChip(SsidMatchMode.REGEX, R.string.editor_match_regex, atom, onChange)
+    }
+    if (atom.ssidMatch == SsidMatchMode.REGEX) {
+        Text(stringResource(R.string.editor_regex_hint), style = MaterialTheme.typography.bodySmall)
+    }
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        Text(stringResource(R.string.editor_case_insensitive), modifier = Modifier.weight(1f))
+        Switch(checked = atom.caseInsensitive, onCheckedChange = { onChange(atom.copy(caseInsensitive = it)) })
     }
     Text(stringResource(R.string.editor_rssi, atom.minRssi))
     Slider(
@@ -306,7 +337,7 @@ private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
         onValueChange = { onChange(atom.copy(minRssi = it.roundToInt())) },
         valueRange = -90f..-40f,
     )
-    SignalReadout(atom.ssid, atom.bssid)
+    SignalReadout(atom)
     Text(stringResource(R.string.editor_dwell, formatDwell(atom.wifiDwellSec, stringResource(R.string.editor_dwell_immediate))))
     Slider(
         value = atom.wifiDwellSec.toFloat(),
@@ -333,10 +364,15 @@ private fun WifiModeChip(mode: WifiMatchMode, label: Int, atom: AtomDraft, onCha
 }
 
 @Composable
-private fun SignalReadout(ssid: String, bssid: String) {
+private fun SsidMatchChip(mode: SsidMatchMode, label: Int, atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
+    FilterChip(selected = atom.ssidMatch == mode, onClick = { onChange(atom.copy(ssidMatch = mode)) }, label = { Text(stringResource(label)) })
+}
+
+@Composable
+private fun SignalReadout(atom: AtomDraft) {
     val context = LocalContext.current
     var tick by remember { mutableIntStateOf(0) }
-    DisposableEffect(ssid) {
+    DisposableEffect(atom.ssid, atom.ssidMatch, atom.caseInsensitive) {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context?, intent: Intent?) { tick++ }
         }
@@ -353,9 +389,15 @@ private fun SignalReadout(ssid: String, bssid: String) {
         Text(stringResource(R.string.editor_signal_need_permission))
         return
     }
-    val level = remember(tick, ssid, bssid) { currentRssi(context, ssid, bssid) }
+    val level = remember(tick, atom.ssid, atom.bssid, atom.ssidMatch, atom.caseInsensitive) {
+        currentRssi(context, atom)
+    }
     Text(
-        if (level == null || ssid.isBlank()) stringResource(R.string.editor_signal_missing) else stringResource(R.string.editor_signal_now, level),
+        if (level == null || atom.ssid.isBlank()) {
+            stringResource(R.string.editor_signal_missing)
+        } else {
+            stringResource(R.string.editor_signal_now, level)
+        },
     )
 }
 
@@ -577,17 +619,25 @@ private fun readVisibleNetworks(context: Context): List<tw.geowifi.launcher.core
     }
 }
 
-private fun currentRssi(context: Context, ssid: String, bssid: String): Int? {
-    if (ssid.isBlank()) return null
+private fun currentRssi(context: Context, atom: AtomDraft): Int? {
+    if (atom.ssid.isBlank()) return null
     val manager = context.getSystemService(WifiManager::class.java)
     val results = try {
         manager.scanResults
     } catch (_: SecurityException) {
         emptyList()
     }
-    return results.filter { result ->
-        WifiIds.sameSsid(ssid, result.SSID ?: "") && WifiIds.bssidAllowed(bssid.ifBlank { null }, result.BSSID)
-    }.maxOfOrNull { it.level }
+    val sights = results.mapNotNull { result ->
+        val ssid = WifiIds.normalizeSsid(result.SSID) ?: return@mapNotNull null
+        tw.geowifi.launcher.core.wifi.WifiSight(ssid, result.BSSID, result.level)
+    }
+    return WifiIds.strongestMatch(
+        atom.ssid,
+        atom.bssid.ifBlank { null },
+        sights,
+        atom.ssidMatch,
+        atom.caseInsensitive,
+    )?.rssiDbm
 }
 
 private fun loadBonded(context: Context): List<Pair<String, String>> {
@@ -616,6 +666,7 @@ internal class EditorViewModel(
     var ranges by mutableStateOf(listOf(9 * 60 to 18 * 60))
     var targetPackage by mutableStateOf("")
     var targetLabel by mutableStateOf("")
+    var cooldownMinutes by mutableStateOf(30)
     var error by mutableStateOf<Int?>(null)
 
     init {
@@ -632,6 +683,7 @@ internal class EditorViewModel(
                     }
                     targetPackage = rule.targetPackage
                     targetLabel = rule.targetLabel
+                    cooldownMinutes = (rule.cooldownMillis / 60_000L).toInt()
                 }
                 loaded = true
             }
@@ -683,6 +735,7 @@ internal class EditorViewModel(
                     } else {
                         null
                     },
+                    cooldownMillis = cooldownMinutes * 60_000L,
                     targetPackage = targetPackage,
                     targetLabel = targetLabel,
                 ),
@@ -728,6 +781,8 @@ private fun tw.geowifi.launcher.core.rule.Atom.toDraft(): AtomDraft {
             ssid = ssid,
             bssid = bssid.orEmpty(),
             wifiMode = mode,
+            ssidMatch = ssidMatch,
+            caseInsensitive = caseInsensitive,
             minRssi = minRssiDbm,
             wifiDwellSec = (dwellMillis / 1000).toInt(),
             rearmDrop = rearmDropDbm,
@@ -757,6 +812,8 @@ private fun AtomDraft.toAtom(): tw.geowifi.launcher.core.rule.Atom {
             dwellMillis = wifiDwellSec * 1000L,
             rearmDropDbm = rearmDrop,
             disappearMillis = disappearMin * 60_000L,
+            ssidMatch = ssidMatch,
+            caseInsensitive = caseInsensitive,
         )
         DraftKind.CHARGING -> ChargingAtom(id, chargeTypes)
         DraftKind.BLUETOOTH -> BluetoothAtom(id, btAddress, btName)

@@ -9,6 +9,7 @@ import tw.geowifi.launcher.core.rule.ChargingAtom
 import tw.geowifi.launcher.core.rule.Clause
 import tw.geowifi.launcher.core.rule.RegionAtom
 import tw.geowifi.launcher.core.rule.WifiAtom
+import tw.geowifi.launcher.core.wifi.SsidMatchMode
 import tw.geowifi.launcher.core.schedule.WeekSchedule
 import tw.geowifi.launcher.core.rule.LocationTransition
 
@@ -36,6 +37,7 @@ fun summarizeClauses(context: Context, clauses: List<Clause>): String {
                 }
                 is WifiAtom -> context.getString(
                     R.string.summary_wifi,
+                    ssidMatchLabel(context, atom.ssidMatch),
                     atom.ssid,
                     atom.minRssiDbm,
                     formatDwell((atom.dwellMillis / 1000).toInt(), context.getString(R.string.editor_dwell_immediate)),
@@ -75,6 +77,15 @@ fun summarizeSchedule(context: Context, schedule: WeekSchedule?): String {
         if (range.crossesMidnight) text + context.getString(R.string.summary_cross) else text
     }
     return "$days $ranges"
+}
+
+fun ssidMatchLabel(context: Context, mode: SsidMatchMode): String {
+    return when (mode) {
+        SsidMatchMode.CONTAINS -> context.getString(R.string.editor_match_contains)
+        SsidMatchMode.EXACT -> context.getString(R.string.editor_match_exact)
+        SsidMatchMode.STARTS_WITH -> context.getString(R.string.editor_match_prefix)
+        SsidMatchMode.REGEX -> context.getString(R.string.editor_match_regex)
+    }
 }
 
 fun chargeLabel(context: Context, type: ChargeType): String {

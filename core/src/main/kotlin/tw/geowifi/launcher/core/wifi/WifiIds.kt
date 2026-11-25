@@ -1,5 +1,7 @@
 package tw.geowifi.launcher.core.wifi
 
+enum class SsidMatchMode { EXACT, CONTAINS, STARTS_WITH, REGEX }
+
 data class WifiSight(
     val ssid: String,
     val bssid: String?,
@@ -39,7 +41,54 @@ object WifiIds {
         return want == got
     }
 
-    fun matches(expectedSsid: String, expectedBssid: String?, sight: WifiSight): Boolean {
-        return sameSsid(expectedSsid, sight.ssid) && bssidAllowed(expectedBssid, sight.bssid)
+    fun ssidMatches(
+        pattern: String,
+        observed: String,
+        mode: SsidMatchMode,
+        caseInsensitive: Boolean,
+    ): Boolean {
+        val rawObserved = normalizeSsid(observed) ?: return false
+        val rawPattern = normalizeSsid(pattern) ?: return false
+        return when (mode) {
+            SsidMatchMode.REGEX -> regexMatches(rawPattern, rawObserved, caseInsensitive)
+            SsidMatchMode.EXACT -> fold(rawPattern, caseInsensitive) == fold(rawObserved, caseInsensitive)
+            SsidMatchMode.CONTAINS -> fold(rawObserved, caseInsensitive).contains(fold(rawPattern, caseInsensitive))
+            SsidMatchMode.STARTS_WITH -> fold(rawObserved, caseInsensitive).startsWith(fold(rawPattern, caseInsensitive))
+        }
+    }
+
+    fun matches(
+        pattern: String,
+        expectedBssid: String?,
+        sight: WifiSight,
+        mode: SsidMatchMode = SsidMatchMode.EXACT,
+        caseInsensitive: Boolean = false,
+    ): Boolean {
+        return ssidMatches(pattern, sight.ssid, mode, caseInsensitive) && bssidAllowed(expectedBssid, sight.bssid)
+    }
+
+    fun strongestMatch(
+        pattern: String,
+        expectedBssid: String?,
+        sights: List<WifiSight>,
+        mode: SsidMatchMode,
+        caseInsensitive: Boolean,
+    ): WifiSight? {
+        return sights
+            .filter { matches(pattern, expectedBssid, it, mode, caseInsensitive) }
+            .maxByOrNull { it.rssiDbm }
+    }
+
+    private fun fold(value: String, caseInsensitive: Boolean): String {
+        return if (caseInsensitive) value.lowercase() else value
+    }
+
+    private fun regexMatches(pattern: String, observed: String, caseInsensitive: Boolean): Boolean {
+        return try {
+            val options = if (caseInsensitive) setOf(RegexOption.IGNORE_CASE) else emptySet()
+            Regex(pattern, options).matches(observed)
+        } catch (_: IllegalArgumentException) {
+            false
+        }
     }
 }

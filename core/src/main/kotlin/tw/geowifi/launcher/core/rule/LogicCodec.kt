@@ -3,11 +3,18 @@ package tw.geowifi.launcher.core.rule
 import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import tw.geowifi.launcher.core.wifi.SsidMatchMode
+
+data class StoredLogic(
+    val clauses: List<Clause>,
+    val cooldownMillis: Long,
+)
 
 object LogicCodec {
-    fun encode(clauses: List<Clause>): String {
+    fun encode(clauses: List<Clause>, cooldownMillis: Long = Defaults.ruleCooldownMillis): String {
         val lines = ArrayList<String>()
         lines += "V1"
+        lines += "COOLDOWN $cooldownMillis"
         for (clause in clauses) {
             lines += "CLAUSE"
             for (atom in clause.options) {
@@ -17,14 +24,17 @@ object LogicCodec {
         return lines.joinToString("\n")
     }
 
-    fun decode(raw: String): List<Clause> {
+    fun decode(raw: String): StoredLogic {
         val lines = raw.split('\n').map { it.trimEnd() }.filter { it.isNotBlank() }
         require(lines.firstOrNull() == "V1") { "logic version" }
         val clauses = ArrayList<Clause>()
         var current = ArrayList<Atom>()
         var started = false
+        var cooldown = Defaults.ruleCooldownMillis
         for (line in lines.drop(1)) {
-            if (line == "CLAUSE") {
+            if (line.startsWith("COOLDOWN ")) {
+                cooldown = line.removePrefix("COOLDOWN ").trim().toLong()
+            } else if (line == "CLAUSE") {
                 if (started) clauses += Clause(current.toList())
                 current = ArrayList()
                 started = true
@@ -34,7 +44,7 @@ object LogicCodec {
             }
         }
         if (started) clauses += Clause(current.toList())
-        return clauses
+        return StoredLogic(clauses, cooldown)
     }
 
     private fun encodeAtom(atom: Atom): String {
@@ -60,6 +70,8 @@ object LogicCodec {
                 atom.maxGapMillis.toString(),
                 enc(atom.bssid ?: ""),
                 enc(atom.ssid),
+                atom.ssidMatch.name,
+                if (atom.caseInsensitive) "1" else "0",
             ).joinToString(" ")
             is ChargingAtom -> {
                 val types = if (atom.types.isEmpty()) "*" else atom.types.sortedBy { it.name }.joinToString("|") { it.name }
@@ -96,6 +108,8 @@ object LogicCodec {
                 maxGapMillis = parts[7].toLong(),
                 bssid = dec(parts[8]).ifBlank { null },
                 ssid = dec(parts[9]),
+                ssidMatch = if (parts.size > 10) SsidMatchMode.valueOf(parts[10]) else SsidMatchMode.CONTAINS,
+                caseInsensitive = if (parts.size > 11) parts[11] == "1" else true,
             )
             "CHARGE" -> ChargingAtom(
                 id = parts[1],
@@ -132,6 +146,7 @@ object MemoryCodec {
             if (memory.windowActive) "1" else "0",
             if (memory.formulaKnown) "1" else "0",
             if (memory.formulaTrue) "1" else "0",
+            memory.lastFiredAtMillis?.toString() ?: "-",
         ).joinToString(" ")
         for ((id, state) in memory.atoms.toSortedMap()) {
             lines += listOf(
@@ -171,6 +186,7 @@ object MemoryCodec {
             windowActive = header[1] == "1",
             formulaKnown = header[2] == "1",
             formulaTrue = header[3] == "1",
+            lastFiredAtMillis = header.getOrNull(4)?.let { token -> if (token == "-") null else token.toLong() },
             atoms = atoms,
         )
     }

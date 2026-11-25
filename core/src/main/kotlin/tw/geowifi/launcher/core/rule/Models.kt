@@ -1,6 +1,7 @@
 package tw.geowifi.launcher.core.rule
 
 import tw.geowifi.launcher.core.schedule.WeekSchedule
+import tw.geowifi.launcher.core.wifi.SsidMatchMode
 import tw.geowifi.launcher.core.wifi.WifiSight
 
 object Defaults {
@@ -12,6 +13,7 @@ object Defaults {
     const val locationDwellMillis = 60_000L
     const val locationHysteresisMeters = 30.0
     const val defaultRadiusMeters = 100.0
+    const val ruleCooldownMillis = 30L * 60L * 1000L
 }
 
 enum class WifiMatchMode { CONNECTED, VISIBLE, EITHER }
@@ -50,6 +52,8 @@ data class WifiAtom(
     val rearmDropDbm: Int = Defaults.rearmDropDbm,
     val disappearMillis: Long = Defaults.disappearMillis,
     val maxGapMillis: Long = Defaults.maxGapMillis,
+    val ssidMatch: SsidMatchMode = SsidMatchMode.CONTAINS,
+    val caseInsensitive: Boolean = true,
 ) : Atom
 
 data class ChargingAtom(
@@ -68,6 +72,7 @@ data class RuleSpec(
     val enabled: Boolean,
     val clauses: List<Clause>,
     val schedule: WeekSchedule?,
+    val cooldownMillis: Long = Defaults.ruleCooldownMillis,
 )
 
 data class AtomState(
@@ -84,6 +89,7 @@ data class RuleMemory(
     val windowActive: Boolean = false,
     val formulaKnown: Boolean = false,
     val formulaTrue: Boolean = false,
+    val lastFiredAtMillis: Long? = null,
     val atoms: Map<String, AtomState> = emptyMap(),
 )
 

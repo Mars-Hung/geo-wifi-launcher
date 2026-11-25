@@ -8,13 +8,13 @@
 
 偵錯 APK（已用 Android 偵錯金鑰簽名，可以直接安裝）：
 
-- 檔案：[`releases/context-launch-v0.1.0-debug.apk`](releases/context-launch-v0.1.0-debug.apk)
-- 版本：0.1.0（versionCode 1）
-- SHA-256：`b495e5ae9a4d2208bd75f3855ddf038357528057f623d707bcf7eef20004dfac`
+- 檔案：[`releases/context-launch-v0.1.1-debug.apk`](releases/context-launch-v0.1.1-debug.apk)
+- 版本：0.1.1（versionCode 2）
+- SHA-256：`7bed141a916e73ee62aeb6cd468c58a4de4430096c2d901ee8104974f35acfb4`
 
 這個 Git 倉庫是**公開**的。下面的連結不需要登入 GitHub：
 
-https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android-e5e7/releases/context-launch-v0.1.0-debug.apk
+https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android-e5e7/releases/context-launch-v0.1.1-debug.apk
 
 手機瀏覽器打開後下載，再到檔案 App 點 APK 安裝。若系統擋住「不明的應用程式」，到設定裡允許該瀏覽器或檔案 App 安裝未知應用程式。安裝前可以用上面的 SHA-256 核對檔案。
 
@@ -46,7 +46,7 @@ https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android
 1. 在「規則」按新增。
 2. 加一或多個**必要條件**。每一塊都要成立。同一塊裡若有多個條件，只要其中一個成立即可。
    - 位置：在地圖上點選，或用目前位置，或手動輸入經緯度。可選「進入」或「離開」。
-   - Wi-Fi：可掃描附近網路。比對已連線、掃得到，或兩者皆可。可再限制 BSSID。
+   - Wi-Fi：預設看**掃描結果**，手機不必連上那個網路。名稱可比對「包含」（預設，例如 `7-11` 對到 `7-11_FREE`）、「完全相符」、「開頭是」或正規表達式，並可選忽略大小寫。掃描裡任何一個相符的網路都算，訊號與停留看其中最強的那個。已連線只是選用。可再限制 BSSID。
    - 開始充電：可複選 USB、AC、無線；都不選代表任何電源。以「電源接上」為準，包含已經充滿但仍插著。
    - 藍牙：從已配對裝置挑選，例如車機。
 3. 例子：
@@ -54,7 +54,8 @@ https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android
    - 開始充電 **而且**（在公司範圍內 **或** 掃到公司 Wi-Fi）。
    - 開始充電 **而且** 車機藍牙已連線。
 4. 選擇要開啟的 App。
-5. 可加上星期與一個以上的時段。時間用手機的本地時區。
+5. 冷卻時間預設 **30 分鐘**。啟動過一次之後，這段時間內即使離開再遇到下一家（例如連續經過好幾家 7-ELEVEN）也不會再開。設成 0 就只靠條件解除來重新待命。
+6. 可加上星期與一個以上的時段。時間用手機的本地時區。
 
 ### 時間窗
 
@@ -70,12 +71,16 @@ https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android
 
 ### 避免路過就觸發
 
-**Wi-Fi**
+**Wi-Fi（掃描，不必連線）**
 
-- 最低訊號預設 **-65 dBm**，可調。訊號必須 **大於或等於** 門檻。編輯畫面會顯示所選 SSID 目前的訊號。
-- 停留時間預設 **60 秒**。連線模式也要等這段時間，不是一連上就開。設成 0 則立刻成立。
-- 重新武裝：訊號要低於 `門檻 - 10 dBm`（預設低於 -75 dBm），或連續消失 **3 分鐘**。中間那一段遲滯不會馬上取消，避免訊號在邊界抖動時反覆啟動。
-- 兩次有效掃描如果間隔超過 5 分鐘，尚未完成的停留會重算，避免用一段很舊的掃描結果假裝你一直在現場。
+- 預設模式是「掃描到」。只要附近掃到相符的 SSID 就成立，例如名稱**包含** `7-11` 就打開 7-ELEVEN，手機不會連上那組 Wi-Fi。
+- 比對套用在掃描結果裡的**每一個**網路。RSSI 門檻與停留時間看其中**訊號最強**的那個。
+- 最低訊號預設 **-65 dBm**。必須大於或等於門檻。編輯畫面會顯示目前最強的相符訊號。
+- 停留時間預設 **60 秒**。已連線模式（選用）也要等這段時間。設成 0 則立刻成立。
+- 重新武裝：最強相符訊號低於 `門檻 - 10 dBm`，或相符網路連續消失 **3 分鐘**。
+- 另外每條規則有冷卻時間，預設 30 分鐘，避免一路經過很多家時重複開啟。
+- 兩次有效掃描如果間隔超過 5 分鐘，尚未完成的停留會重算。
+- 掃描不需要已連上任何 Wi-Fi。Wi-Fi 要開著，定位服務也要開著。部分手機在系統設定的「Wi-Fi 掃描」（即使 Wi-Fi 關閉仍掃描）打開時，Wi-Fi 關掉也掃得到。Android 仍會限制掃描頻率。
 
 **位置**
 
@@ -97,7 +102,7 @@ https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android
 
 ## 限制
 
-- **Wi-Fi 掃描有節流。** 就算是前景 App，Android 9 以後大約每 2 分鐘最多 4 次。背景更少。掃描被拒絕時，這個 App 會沿用上一次結果，但不會把過期的掃描當成「又看到了」來提前完成停留。可見範圍的規則在節流很兇時，實際等待會比你設的 60 秒更久。開發者選項可以暫時關掉 Wi-Fi scan throttling。
+- **Wi-Fi 掃描有節流，而且通常要開定位。** 前景 App 在 Android 9 以後大約每 2 分鐘最多 4 次；這個 App 約每 30 秒請求一次，被拒絕就沿用上一筆結果，但不會把過期掃描拿來提前完成停留。實際等待可能比 60 秒更久。開發者選項可以暫時關掉 Wi-Fi scan throttling。沒連上任何網路也可以掃。若 Wi-Fi 關閉，要看系統是否允許「Wi-Fi 掃描」（設定裡常寫成即使不用 Wi-Fi 也掃描）。
 - **背景開啟其他 App 仍可能失敗。** `SYSTEM_ALERT_WINDOW` 目前仍是系統允許的例外，但新版 Android 可能再收緊。失敗時請點通知。
 - **前景服務類型。** 服務宣告 `location`，有藍牙權限時在 Android 14 以上再加上 `connectedDevice`。沒有「一律允許」位置時，服務不會留在背景。
 - **地理圍欄**最多約 100 個，初始觸發與停留由 Play 服務決定，可能比設定的秒數再晚幾秒到幾十秒。

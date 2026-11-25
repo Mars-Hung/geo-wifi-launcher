@@ -27,15 +27,24 @@ object RuleEngine {
         val formula = formulaValue(spec.clauses, values)
         val window = TimeWindows.isActiveAt(spec.schedule, localNow)
         var armed = memory.armed
+        var lastFiredAt = memory.lastFiredAtMillis
         var action: Action = Action.None
+        val coolingDown = lastFiredAt != null &&
+            spec.cooldownMillis > 0 &&
+            inputs.nowMillis - lastFiredAt < spec.cooldownMillis
         if (spec.enabled && formula == true && window && armed) {
-            val reason = when {
-                exitEdge && memory.windowActive -> FireReason.LEFT_REGION
-                memory.formulaKnown && memory.formulaTrue && !memory.windowActive -> FireReason.WINDOW_OPENED
-                else -> FireReason.CONDITIONS_MET
+            if (coolingDown) {
+                armed = false
+            } else {
+                val reason = when {
+                    exitEdge && memory.windowActive -> FireReason.LEFT_REGION
+                    memory.formulaKnown && memory.formulaTrue && !memory.windowActive -> FireReason.WINDOW_OPENED
+                    else -> FireReason.CONDITIONS_MET
+                }
+                action = Action.Fire(reason)
+                armed = false
+                lastFiredAt = inputs.nowMillis
             }
-            action = Action.Fire(reason)
-            armed = false
         } else if (formula == false || (formula == true && !window)) {
             armed = true
         }
@@ -49,6 +58,7 @@ object RuleEngine {
                     false -> false
                     null -> memory.formulaTrue
                 },
+                lastFiredAtMillis = lastFiredAt,
                 atoms = states,
             ),
             action = action,
@@ -174,9 +184,22 @@ object RuleEngine {
     }
 
     private fun wifiReading(atom: WifiAtom, wifi: WifiInputs): WifiReading {
-        val connected = wifi.connected?.takeIf { WifiIds.matches(atom.ssid, atom.bssid, it) }
-        val visible = wifi.visible.filter { WifiIds.matches(atom.ssid, atom.bssid, it) }
-            .maxByOrNull { it.rssiDbm }
+        val connected = wifi.connected?.let { sight ->
+            WifiIds.strongestMatch(
+                atom.ssid,
+                atom.bssid,
+                listOf(sight),
+                atom.ssidMatch,
+                atom.caseInsensitive,
+            )
+        }
+        val visible = WifiIds.strongestMatch(
+            atom.ssid,
+            atom.bssid,
+            wifi.visible,
+            atom.ssidMatch,
+            atom.caseInsensitive,
+        )
         return when (atom.mode) {
             WifiMatchMode.CONNECTED -> when {
                 !wifi.connectedKnown -> WifiReading.Keep

@@ -358,6 +358,7 @@ class MonitorService : Service() {
         getSystemService(ConnectivityManager::class.java).registerNetworkCallback(request, callback!!)
         if (!playServices()) startLocationFallback()
         publishWifi()
+        requestScan()
     }
 
     @SuppressLint("MissingPermission")
@@ -381,15 +382,11 @@ class MonitorService : Service() {
         while (true) {
             delay(15_000)
             publishWifi(scanJustFinished = false)
-            val waitingForVisible = repository().enabled().any { rule ->
-                rule.clauses.any { clause ->
-                    clause.options.any { atom ->
-                        atom is tw.geowifi.launcher.core.rule.WifiAtom && !rule.memory.atoms[atom.id].let { it?.latched == true }
-                    }
-                }
+            val watchesWifi = repository().enabled().any { rule ->
+                rule.clauses.any { clause -> clause.options.any { it is tw.geowifi.launcher.core.rule.WifiAtom } }
             }
             val now = System.currentTimeMillis()
-            if (waitingForVisible && now - lastScan > 30_000) {
+            if (watchesWifi && now - lastScan > 30_000) {
                 lastScan = now
                 requestScan()
             }
@@ -400,6 +397,8 @@ class MonitorService : Service() {
     private fun requestScan() {
         if (!Permissions.fine(this)) return
         val wifi = getSystemService(WifiManager::class.java)
+        // Scanning does not require an association. With Wi-Fi off, Android still
+        // scans when Settings "Wi-Fi scanning" (WIFI_SCAN_ALWAYS_AVAILABLE) is on.
         @Suppress("DEPRECATION")
         val started = try {
             wifi.startScan()

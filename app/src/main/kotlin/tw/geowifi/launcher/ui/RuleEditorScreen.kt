@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -66,6 +67,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import tw.geowifi.launcher.monitor.WifiSnapshots
+import tw.geowifi.launcher.monitor.WifiSurveyor
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
@@ -285,9 +288,10 @@ private fun RegionFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
 
 @Composable
 private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
-    var networks by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
-    var didScan by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var survey by remember { mutableStateOf<WifiSurveyor.Outcome?>(null) }
+    var scanning by remember { mutableStateOf(false) }
     Text(stringResource(R.string.editor_wifi_scan_help), style = MaterialTheme.typography.bodySmall)
     OutlinedTextField(
         value = atom.ssid,
@@ -301,16 +305,34 @@ private fun WifiFields(atom: AtomDraft, onChange: (AtomDraft) -> Unit) {
         label = { Text(stringResource(R.string.editor_wifi_bssid)) },
         modifier = Modifier.fillMaxWidth(),
     )
-    OutlinedButton(onClick = {
-        didScan = true
-        networks = readVisibleNetworks(context).map { (it.ssid to (it.bssid ?: "")) }
-    }) { Text(stringResource(R.string.editor_wifi_scan)) }
-    if (didScan && networks.isEmpty()) {
-        Text(stringResource(R.string.editor_wifi_empty), style = MaterialTheme.typography.bodySmall)
+    LaunchedEffect(Unit) {
+        scanning = true
+        survey = WifiSurveyor.refresh(context)
+        scanning = false
     }
-    networks.distinctBy { it.first to it.second }.take(12).forEach { (ssid, bssid) ->
-        TextButton(onClick = { onChange(atom.copy(ssid = ssid, bssid = bssid)) }) {
-            Text("$ssid  $bssid")
+    OutlinedButton(onClick = {
+        if (scanning) return@OutlinedButton
+        scanning = true
+        scope.launch {
+            survey = WifiSurveyor.refresh(context)
+            scanning = false
+        }
+    }) { Text(stringResource(if (scanning) R.string.editor_wifi_scanning else R.string.editor_wifi_refresh)) }
+    survey?.let { outcome ->
+        Text(outcome.status, style = MaterialTheme.typography.bodySmall)
+        Text(outcome.detail, style = MaterialTheme.typography.bodySmall)
+        if (outcome.networks.isEmpty()) {
+            Text(stringResource(R.string.editor_wifi_empty), style = MaterialTheme.typography.bodySmall)
+        }
+        Text(stringResource(R.string.editor_wifi_pick_hint), style = MaterialTheme.typography.bodySmall)
+        outcome.networks.forEach { network ->
+            val bands = if (network.bands.isEmpty()) "—" else network.bands.joinToString("+") + " GHz"
+            val label = if (network.connected) {
+                stringResource(R.string.editor_wifi_row_connected, network.ssid, network.rssiDbm, bands)
+            } else {
+                stringResource(R.string.editor_wifi_row, network.ssid, network.rssiDbm, bands)
+            }
+            TextButton(onClick = { onChange(atom.copy(ssid = network.ssid)) }) { Text(label) }
         }
     }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.horizontalScroll(rememberScrollState())) {
@@ -604,37 +626,12 @@ private fun readCurrentLocation(context: Context, onPoint: (Double, Double) -> U
     }
 }
 
-private fun readVisibleNetworks(context: Context): List<tw.geowifi.launcher.core.wifi.WifiSight> {
-    if (!Permissions.fine(context)) return emptyList()
-    val manager = context.getSystemService(WifiManager::class.java)
-    return try {
-        @Suppress("DEPRECATION")
-        manager.startScan()
-        manager.scanResults.mapNotNull { result ->
-            val ssid = WifiIds.normalizeSsid(result.SSID) ?: return@mapNotNull null
-            tw.geowifi.launcher.core.wifi.WifiSight(ssid, result.BSSID, result.level)
-        }
-    } catch (_: SecurityException) {
-        emptyList()
-    }
-}
-
 private fun currentRssi(context: Context, atom: AtomDraft): Int? {
-    if (atom.ssid.isBlank()) return null
-    val manager = context.getSystemService(WifiManager::class.java)
-    val results = try {
-        manager.scanResults
-    } catch (_: SecurityException) {
-        emptyList()
-    }
-    val sights = results.mapNotNull { result ->
-        val ssid = WifiIds.normalizeSsid(result.SSID) ?: return@mapNotNull null
-        tw.geowifi.launcher.core.wifi.WifiSight(ssid, result.BSSID, result.level)
-    }
+    if (atom.ssid.isBlank() || !Permissions.fine(context)) return null
     return WifiIds.strongestMatch(
         atom.ssid,
         atom.bssid.ifBlank { null },
-        sights,
+        WifiSnapshots.sights(context),
         atom.ssidMatch,
         atom.caseInsensitive,
     )?.rssiDbm

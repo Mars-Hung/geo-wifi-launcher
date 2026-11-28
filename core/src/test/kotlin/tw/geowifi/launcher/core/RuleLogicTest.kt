@@ -36,7 +36,9 @@ import tw.geowifi.launcher.core.schedule.ScheduleCodec
 import tw.geowifi.launcher.core.schedule.TimeRange
 import tw.geowifi.launcher.core.schedule.TimeWindows
 import tw.geowifi.launcher.core.schedule.WeekSchedule
+import tw.geowifi.launcher.core.wifi.RawAccessPoint
 import tw.geowifi.launcher.core.wifi.SsidMatchMode
+import tw.geowifi.launcher.core.wifi.WifiCatalog
 import tw.geowifi.launcher.core.wifi.WifiIds
 import tw.geowifi.launcher.core.wifi.WifiSight
 
@@ -415,6 +417,43 @@ class RuleLogicTest {
         step = eval(spec, step.memory, wifiAbsent(), 32 * 60_000)
         step = eval(spec, step.memory, sight("7-11 C", -40), 33 * 60_000)
         assertFire(step, FireReason.CONDITIONS_MET)
+    }
+
+    @Test
+    fun catalogKeepsEveryNamedNetworkAndMergesTheConnection() {
+        val snapshot = WifiCatalog.summarize(
+            listOf(
+                RawAccessPoint("\"Home WiFi\"", "AA:BB:CC:DD:EE:01", -70, 2412, connected = false),
+                RawAccessPoint("Home WiFi", "AA:BB:CC:DD:EE:02", -48, 5180, connected = false),
+                RawAccessPoint("Cafe", "11:22:33:44:55:66", -90, 5745, connected = false),
+                RawAccessPoint("6ghz-lab", null, -62, 6275, connected = false),
+                RawAccessPoint("<unknown ssid>", "02:00:00:00:00:00", -40, 2437, connected = false),
+                RawAccessPoint("", null, -30, 2412, connected = false),
+                RawAccessPoint("\"Only Connected\"", "10:00:00:00:00:01", -55, 2412, connected = true),
+            ),
+        )
+        assertEquals(7, snapshot.rawCount)
+        assertEquals(2, snapshot.hiddenCount)
+        assertEquals(listOf("Home WiFi", "Only Connected", "6ghz-lab", "Cafe"), snapshot.networks.map { it.ssid })
+        val home = snapshot.networks.first()
+        assertEquals(-48, home.rssiDbm)
+        assertEquals(listOf("2.4", "5"), home.bands)
+        assertFalse(home.connected)
+        assertTrue(snapshot.networks[1].connected)
+        assertEquals(listOf("6"), snapshot.networks[2].bands)
+        assertTrue(snapshot.networks.any { it.rssiDbm == -90 })
+    }
+
+    @Test
+    fun visibleRuleMatchesTheConnectedSsidWhenItIsMissingFromTheScan() {
+        val spec = rule(wifi(ssid = "Home WiFi", ssidMatch = SsidMatchMode.EXACT, dwellMillis = 0))
+        val inputs = WifiInputs(
+            connected = WifiSight("\"Home WiFi\"", "aa:bb:cc:dd:ee:10", -42),
+            connectedKnown = true,
+            visible = emptyList(),
+            visibleFresh = true,
+        )
+        assertFire(eval(spec, RuleMemory(), inputs.at(0), noon()), FireReason.CONDITIONS_MET)
     }
 
     @Test

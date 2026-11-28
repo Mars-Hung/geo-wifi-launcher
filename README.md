@@ -8,13 +8,13 @@
 
 偵錯 APK（已用 Android 偵錯金鑰簽名，可以直接安裝）：
 
-- 檔案：[`releases/context-launch-v0.1.1-debug.apk`](releases/context-launch-v0.1.1-debug.apk)
-- 版本：0.1.1（versionCode 2）
-- SHA-256：`7bed141a916e73ee62aeb6cd468c58a4de4430096c2d901ee8104974f35acfb4`
+- 檔案：[`releases/context-launch-v0.1.2-debug.apk`](releases/context-launch-v0.1.2-debug.apk)
+- 版本：0.1.2（versionCode 3）
+- SHA-256：`45c7d174cfdbc74c566cd107e9845608f577913f62091afdb176992f41b83fdf`
 
 這個 Git 倉庫是**公開**的。下面的連結不需要登入 GitHub：
 
-https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android-e5e7/releases/context-launch-v0.1.1-debug.apk
+https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android-e5e7/releases/context-launch-v0.1.2-debug.apk
 
 手機瀏覽器打開後下載，再到檔案 App 點 APK 安裝。若系統擋住「不明的應用程式」，到設定裡允許該瀏覽器或檔案 App 安裝未知應用程式。安裝前可以用上面的 SHA-256 核對檔案。
 
@@ -81,6 +81,7 @@ https://github.com/Mars-Hung/geo-wifi-launcher/raw/cursor/context-launch-android
 - 另外每條規則有冷卻時間，預設 30 分鐘，避免一路經過很多家時重複開啟。
 - 兩次有效掃描如果間隔超過 5 分鐘，尚未完成的停留會重算。
 - 掃描不需要已連上任何 Wi-Fi。Wi-Fi 要開著，定位服務也要開著。部分手機在系統設定的「Wi-Fi 掃描」（即使 Wi-Fi 關閉仍掃描）打開時，Wi-Fi 關掉也掃得到。Android 仍會限制掃描頻率。
+- 規則編輯裡的清單會等掃描完成，而不是只讀舊快取。同一個名稱的 2.4／5／6 GHz 合併成一列，顯示最強訊號與頻段，不用訊號門檻把清單濾掉。目前已連上的網路即使沒出現在掃描結果裡也會列出來，規則比對同樣會把它算進去。清單下方有一行狀態：權限、定位服務、Wi-Fi 開關、關閉時是否仍可掃描、原始筆數與顯示數量。若系統節流，會寫明並保留上一筆結果。Android 13 以後用 `WifiSsid` 讀名稱，避免只拿到空白 SSID。
 
 **位置**
 

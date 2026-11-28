@@ -469,42 +469,14 @@ object WifiReader {
         if (!Permissions.fine(context)) {
             return WifiInputs(null, connectedKnown = false, emptyList(), visibleFresh = false)
         }
-        val manager = context.getSystemService(WifiManager::class.java)
-        val connected = connectedSight(context, manager)
-        val visible = try {
-            manager.scanResults.map { result ->
-                WifiSight(result.SSID ?: "", result.BSSID, result.level)
-            }
-        } catch (_: SecurityException) {
-            emptyList()
-        }
+        val connected = WifiSnapshots.connectedSight(context)
+        val visible = WifiSnapshots.sights(context)
         return WifiInputs(
             connected = connected,
             connectedKnown = true,
             visible = visible,
             visibleFresh = visibleFresh,
         )
-    }
-
-    private fun connectedSight(context: Context, manager: WifiManager): WifiSight? {
-        val info = connectedInfo(context) ?: run {
-            @Suppress("DEPRECATION")
-            manager.connectionInfo
-        }
-        val ssid = WifiIds.normalizeSsid(info?.ssid) ?: return null
-        return WifiSight(ssid, info?.bssid, info?.rssi ?: -127)
-    }
-
-    private fun connectedInfo(context: Context): WifiInfo? {
-        if (Build.VERSION.SDK_INT < 29) return null
-        val cm = context.getSystemService(ConnectivityManager::class.java)
-        for (network in cm.allNetworks) {
-            val caps = cm.getNetworkCapabilities(network) ?: continue
-            if (!caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue
-            val info = caps.transportInfo as? WifiInfo ?: continue
-            if (WifiIds.normalizeSsid(info.ssid) != null) return info
-        }
-        return null
     }
 }
 

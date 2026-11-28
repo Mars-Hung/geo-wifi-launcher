@@ -4,6 +4,7 @@ import java.time.LocalDateTime
 import tw.geowifi.launcher.core.geo.GeoMath
 import tw.geowifi.launcher.core.schedule.TimeWindows
 import tw.geowifi.launcher.core.wifi.WifiIds
+import tw.geowifi.launcher.core.wifi.WifiSight
 
 object RuleEngine {
     fun evaluate(
@@ -206,10 +207,22 @@ object RuleEngine {
                 connected == null -> WifiReading.Absent
                 else -> WifiReading.Level(connected.rssiDbm)
             }
-            WifiMatchMode.VISIBLE -> when {
-                !wifi.visibleFresh -> WifiReading.Keep
-                visible == null -> WifiReading.Absent
-                else -> WifiReading.Level(visible.rssiDbm)
+            WifiMatchMode.VISIBLE -> {
+                val pool = ArrayList<WifiSight>()
+                if (wifi.visibleFresh) pool.addAll(wifi.visible)
+                if (wifi.connected != null) pool.add(wifi.connected)
+                val best = WifiIds.strongestMatch(
+                    atom.ssid,
+                    atom.bssid,
+                    pool,
+                    atom.ssidMatch,
+                    atom.caseInsensitive,
+                )
+                when {
+                    best != null -> WifiReading.Level(best.rssiDbm)
+                    wifi.visibleFresh -> WifiReading.Absent
+                    else -> WifiReading.Keep
+                }
             }
             WifiMatchMode.EITHER -> {
                 val levels = ArrayList<Int>()

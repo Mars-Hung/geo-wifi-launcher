@@ -60,7 +60,12 @@ object Permissions {
 
     fun locationEnabled(context: Context): Boolean {
         val manager = context.getSystemService(LocationManager::class.java)
-        return manager.isLocationEnabled
+        return if (Build.VERSION.SDK_INT >= 28) {
+            manager.isLocationEnabled
+        } else {
+            manager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+        }
     }
 
     fun canMonitor(context: Context): Boolean = fine(context) && background(context)
